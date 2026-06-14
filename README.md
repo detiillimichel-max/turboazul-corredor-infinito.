@@ -1,8 +1,10 @@
 🚀 Turbo Azul — O Corredor Infinito
 Corra, pule, desvie e colecione argolas na aventura mais veloz das galáxias!
+
 🎮 Sobre o jogo
 Turbo Azul é um jogo de corrida infinita em perspectiva 3D, feito para crianças mas divertido para toda a família. Você controla um simpático personagem azul que corre por estradas com pontes, túneis e viadutos, desviando de obstáculos e coletando argolas douradas para ganhar vidas e comprar itens na loja.
 Desenvolvido em HTML5 puro — sem instalação, sem internet obrigatória, funciona direto no navegador ou dentro de aplicativos de mensagens.
+
 🕹️ Como jogar
 Ação
 Como fazer
@@ -32,6 +34,7 @@ Você começa com 5 vidas
 A cada 20 argolas coletadas você ganha +1 vida automaticamente (barra na parte inferior da tela)
 Vidas extras também podem ser compradas na loja por 40 🪙
 🪙 Argolas
+
 Argolas douradas aparecem com mais frequência do que obstáculos
 Elas chegam mais rápido na tela, facilitando a coleta
 São usadas para comprar itens na loja durante e fora do jogo
@@ -71,6 +74,7 @@ Argolas acumuladas, escudo, magneto e vidas extras são salvos automaticamente n
 Ao voltar ao jogo, seus itens comprados continuam disponíveis
 📁 Arquivos
 Código
+
 Não é necessário servidor, banco de dados ou instalação. Basta abrir o arquivo .html no navegador.
 🚀 Como usar no aplicativo de mensagens
 Envie o arquivo sonic_kids_final.html pelo aplicativo
