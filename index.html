@@ -1,6 +1,216 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Sonic Runner - Modo Infantil</title>
@@ -163,8 +373,7 @@
 <div id="game-container">
 
     <!-- HUD -->
-    <div class="hud-panel">
-        <div class="hud-item"><div class="ring-icon"></div><span id="ring-count">0</span></div>
+           <div class="hud-item"><div class="ring-icon"></div><span id="ring-count">0</span></div>
         <div class="hud-item lives">❤️ <span id="life-count">5</span></div>
         <div class="hud-item score"><span id="score-count">00000</span></div>
     </div>
@@ -256,6 +465,197 @@
     <div id="toast"></div>
 </div>
 
+
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx    = canvas.getContext('2d');
@@ -330,6 +730,7 @@ const totalLanes = 3;
 let laneOffset   = 1;
 
 /* ═══ Salto ═══ */
+    <div class="hud-panel">
 let isJumping    = false;
 let jumpProgress = 0;
 const jumpDuration = 0.032;   // mais lento → salto mais longo no ar (mais fácil de acertar)
@@ -476,297 +877,7 @@ function giveUpGame() {
 }
 
 /* ═══════════════════ LOJA ═══════════════════ */
-// Preços reduzidos para criança conseguir comprar mais facilmente
-const PRICES = { shield:30, life:40, magnet:60, slowmode:50 };
-
-function showStore(ret) {
-    screenToReturn = ret;
-    document.getElementById(ret).classList.add('hidden');
-    document.getElementById('store-screen').classList.remove('hidden');
-    refreshStoreUI();
-}
-function hideStore() {
-    document.getElementById('store-screen').classList.add('hidden');
-    document.getElementById(screenToReturn).classList.remove('hidden');
-    // se voltou da pausa, retoma
-    if (screenToReturn === 'pause-screen') {
-        // mantém pausado — usuário precisa clicar Continuar
-    }
-    updateHUD();
-}
-function refreshStoreUI() {
-    // usa argolas persistentes OU da corrida atual (se estiver na pausa)
-    const available = isPaused ? rings : persistentRings;
-    document.getElementById('store-rings').innerText = available;
-
-    setBtn('btn-shield',  ownedShield,  PRICES.shield,  available, 'Escudo ativo ✓');
-    setBtn('btn-magnet',  ownedMagnet,  PRICES.magnet,  available, 'Magneto ativo ✓');
-    // vida: sempre pode comprar mais
-    const lifeBtn = document.getElementById('btn-life');
-    lifeBtn.textContent = `Comprar (${PRICES.life})`;
-    lifeBtn.disabled = available < PRICES.life;
-    lifeBtn.className = available < PRICES.life ? 'dim' : '';
-    // modo lento
-    const smBtn = document.getElementById('btn-slowmode');
-    smBtn.textContent = `Comprar (${PRICES.slowmode})`;
-    smBtn.disabled = available < PRICES.slowmode;
-    smBtn.className = available < PRICES.slowmode ? 'dim' : '';
-}
-function setBtn(id, owned, price, avail, ownedLabel) {
-    const b = document.getElementById(id);
-    if (owned) { b.textContent = ownedLabel; b.className = 'owned'; b.disabled = true; }
-    else {
-        b.textContent = `Comprar (${price})`;
-        b.disabled = avail < price;
-        b.className = avail < price ? 'dim' : '';
-    }
-}
-function buyItem(item) {
-    // durante pausa usa argolas da corrida; antes/depois usa as persistentes
-    const fromRun = isPaused && gameActive;
-    const pool = fromRun ? rings : persistentRings;
-
-    if (item === 'shield') {
-        if (ownedShield) { showToast('Escudo já está ativo!', true); return; }
-        if (pool < PRICES.shield) { showToast('Argolas insuficientes!', true); return; }
-        if (fromRun) rings -= PRICES.shield; else persistentRings -= PRICES.shield;
-        ownedShield = true; hasShield = true;
-        showToast('🛡️ Escudo comprado e ativado!');
-    } else if (item === 'life') {
-        if (pool < PRICES.life) { showToast('Argolas insuficientes!', true); return; }
-        if (fromRun) rings -= PRICES.life; else persistentRings -= PRICES.life;
-        if (fromRun) { lives++; } else { extraLives++; }
-        showToast(fromRun ? `❤️ +1 vida! Total: ${lives}` : '❤️ Vida guardada!');
-    } else if (item === 'magnet') {
-        if (ownedMagnet) { showToast('Magneto já está ativo!', true); return; }
-        if (pool < PRICES.magnet) { showToast('Argolas insuficientes!', true); return; }
-        if (fromRun) rings -= PRICES.magnet; else persistentRings -= PRICES.magnet;
-        ownedMagnet = true; hasMagnet = true;
-        showToast('🧲 Magneto comprado e ativado!');
-    } else if (item === 'slowmode') {
-        if (pool < PRICES.slowmode) { showToast('Argolas insuficientes!', true); return; }
-        if (fromRun) rings -= PRICES.slowmode; else persistentRings -= PRICES.slowmode;
-        slowMode = true; slowTimer = 60*20;
-        document.getElementById('slow-indicator').classList.add('active');
-        showToast('🐢 Modo Lento ativado por 20s!');
-    }
-    writeSave();
-    updateHUD();
-    refreshStoreUI();
-}
-
-/* ═══════════════════ HUD ═══════════════════ */
-function updateHUD() {
-    document.getElementById('ring-count').innerText  = rings;
-    document.getElementById('life-count').innerText  = lives;
-    document.getElementById('score-count').innerText = String(Math.floor(score)).padStart(5,'0');
-    document.getElementById('start-rings').innerText = persistentRings;
-
-    // barra de progresso argolas → vida
-    const pct = Math.min(100, (ringLifeProgress / RINGS_PER_LIFE) * 100);
-    document.getElementById('life-bar-fill').style.width = pct + '%';
-    document.getElementById('life-bar-label').textContent =
-        `🪙 ${ringLifeProgress} / ${RINGS_PER_LIFE} argolas → ❤️ vida extra`;
-}
-
-/* ═══════════════════ FLUXO ═══════════════════ */
-function startGame() {
-    document.getElementById('start-screen').classList.add('hidden');
-    document.getElementById('pause-btn').classList.remove('hidden');
-    document.getElementById('life-bar-wrap').style.display = 'block';
-
-    lives = 5 + extraLives;
-    extraLives = 0;
-    hasShield = ownedShield;
-    hasMagnet = ownedMagnet;
-    rings = 0; score = 0; ringLifeProgress = 0;
-    speedBase = 0.0055;
-    currentLane = 1; laneOffset = 1;
-    isJumping = false; jumpProgress = 0;
-    isSliding = false; slideTimer = 0;
-    slowMode = false; slowTimer = 0;
-    entities = []; bridges = []; roadScroll = 0; themeIdx = 0;
-
-    document.getElementById('slow-indicator').classList.remove('active');
-    document.getElementById('btn-slow-toggle').textContent = '🐢 ATIVAR MODO LENTO (50🪙)';
-
-    writeSave(); updateHUD();
-
-    // dica some em 5s
-    const hint = document.getElementById('controls-hint');
-    hint.style.opacity = '1'; hint.classList.remove('fade-out');
-    setTimeout(() => hint.classList.add('fade-out'), 5000);
-
-    gameActive = true; isPaused = false;
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    animationFrameId = requestAnimationFrame(animate);
-}
-
-function gameOver() {
-    gameActive = false; isPaused = false;
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
-    persistentRings += rings;
-    if (!hasShield) ownedShield = false;
-    writeSave();
-    document.getElementById('pause-btn').classList.add('hidden');
-    document.getElementById('life-bar-wrap').style.display = 'none';
-    document.getElementById('final-stats').innerText =
-        `Pontos: ${Math.floor(score)} | Argolas: ${rings}`;
-    document.getElementById('gameover-screen').classList.remove('hidden');
-}
-
-function resetGame() {
-    document.getElementById('gameover-screen').classList.add('hidden');
-    startGame();
-}
-
-/* ═══════════════════ PARTÍCULAS ═══════════════════ */
-let particles = [];
-function burst(x, y, color) {
-    for (let i=0; i<10; i++) particles.push({
-        x, y,
-        vx:(Math.random()-.5)*8, vy:(Math.random()-.5)*8,
-        r:Math.random()*3+2, a:1, color
-    });
-}
-
-/* ═══════════════════ AMBIENTE ═══════════════════ */
-function drawEnv() {
-    const hy = canvas.height * HORIZON_Y;
-    const sg = ctx.createLinearGradient(0,0,0,hy);
-    sg.addColorStop(0,'#2a1450'); sg.addColorStop(1,'#5b2a6e');
-    ctx.fillStyle = sg; ctx.fillRect(0,0,canvas.width,hy);
-
-    if (bgLoaded) {
-        ctx.save(); ctx.globalAlpha=.22;
-        ctx.drawImage(bgImage,0,0,canvas.width,hy); ctx.restore();
-    }
-
-    const gg = ctx.createLinearGradient(0,hy,0,canvas.height);
-    gg.addColorStop(0,'#1c1030'); gg.addColorStop(1,'#0c0818');
-    ctx.fillStyle=gg; ctx.fillRect(0,hy,canvas.width,canvas.height-hy);
-
-    // faixas da pista em perspectiva
-    const STRIPES = 22;
-    for (let i=STRIPES; i>=1; i--) {
-        const z0=i/STRIPES, z1=(i-1)/STRIPES;
-        const y0=roadY(z0),  y1=roadY(z1);
-        const cx0=roadCX(z0),cx1=roadCX(z1);
-        const w0=roadW(z0)*canvas.width, w1=roadW(z1)*canvas.width;
-        const dark = ((roadScroll*6+i)%2)<1;
-        ctx.fillStyle = dark ? 'rgba(35,28,58,.95)' : 'rgba(48,40,80,.95)';
-        ctx.beginPath();
-        ctx.moveTo(cx0-w0/2,y0); ctx.lineTo(cx0+w0/2,y0);
-        ctx.lineTo(cx1+w1/2,y1); ctx.lineTo(cx1-w1/2,y1);
-        ctx.closePath(); ctx.fill();
-
-        ctx.strokeStyle='rgba(255,255,255,.1)'; ctx.lineWidth=Math.max(1,1.5*z1);
-        for (let l=1; l<totalLanes; l++) {
-            const x0=cx0-w0/2+(w0/totalLanes)*l, x1=cx1-w1/2+(w1/totalLanes)*l;
-            ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke();
-        }
-        ctx.strokeStyle='rgba(0,255,204,.3)'; ctx.lineWidth=Math.max(1,3*z1);
-        ctx.beginPath();
-        ctx.moveTo(cx0-w0/2,y0); ctx.lineTo(cx1-w1/2,y1);
-        ctx.moveTo(cx0+w0/2,y0); ctx.lineTo(cx1+w1/2,y1);
-        ctx.stroke();
-    }
-
-    // postes de luz
-    for (let i=0; i<6; i++) {
-        const z=((i/6)+roadScroll*.4)%1;
-        const y=roadY(z), w=roadW(z)*canvas.width, cx=roadCX(z), sc=.4+z*1.2;
-        [cx-w/2-14*sc, cx+w/2+14*sc].forEach(px => {
-            ctx.save(); ctx.globalAlpha=.5*z+.1;
-            ctx.fillStyle='#ffd76a'; ctx.shadowBlur=14*sc; ctx.shadowColor='#ffd76a';
-            ctx.beginPath(); ctx.arc(px,y-18*sc,4*sc,0,Math.PI*2); ctx.fill();
-            ctx.fillStyle='rgba(255,255,255,.08)';
-            ctx.fillRect(px-1.5*sc,y-18*sc,3*sc,18*sc);
-            ctx.restore();
-        });
-    }
-}
-
-function drawBridges() {
-    for (let i=bridges.length-1; i>=0; i--) {
-        const b=bridges[i];
-        if (b.z>1.2) { bridges.splice(i,1); continue; }
-        const y=roadY(b.z), cx=roadCX(b.z), w=roadW(b.z)*canvas.width;
-        const ah=canvas.height*.30*b.z;
-        ctx.save(); ctx.globalAlpha=Math.min(1,b.z*1.3);
-        ctx.strokeStyle='rgba(0,255,204,.5)';
-        ctx.lineWidth=Math.max(2,6*b.z); ctx.shadowBlur=12*b.z; ctx.shadowColor='#00ffcc';
-        ctx.beginPath();
-        ctx.moveTo(cx-w/2-10*b.z,y); ctx.lineTo(cx-w/2-10*b.z,y-ah);
-        ctx.lineTo(cx+w/2+10*b.z,y-ah); ctx.lineTo(cx+w/2+10*b.z,y);
-        ctx.stroke();
-        ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.lineWidth=Math.max(1,2*b.z);
-        for (let s=1; s<4; s++) {
-            ctx.beginPath();
-            ctx.moveTo(cx-w/2-10*b.z, y-ah*s/4);
-            ctx.lineTo(cx+w/2+10*b.z, y-ah*s/4);
-            ctx.stroke();
-        }
-        if (b.z<.28) {
-            ctx.fillStyle=`rgba(255,255,255,${Math.min(1,b.z*4)})`;
-            ctx.font='bold 13px sans-serif'; ctx.textAlign='center';
-            ctx.fillText(b.label, cx, y-ah-8);
-        }
-        ctx.restore();
-    }
-}
-
-/* ═══════════════════ PERSONAGEM ═══════════════════ */
-function drawPlayer(x, y, r, pulse, jOff, sq) {
-    const dy = y - jOff;
-    const rx = r * sq.x, ry = r * sq.y;
-    const ss = (1-(jOff/jumpHeight)*.55)*sq.x;
-
-    ctx.save();
-    // sombra
-    ctx.fillStyle=`rgba(0,0,0,${.35*ss})`;
-    ctx.beginPath(); ctx.ellipse(x,y+r*.9,(rx-4)*ss,7*ss,0,0,Math.PI*2); ctx.fill();
-
-    // escudo
-    if (hasShield) {
-        ctx.shadowBlur=15; ctx.shadowColor='#00ffff';
-        ctx.strokeStyle='rgba(0,255,255,.8)'; ctx.lineWidth=3;
-        ctx.beginPath(); ctx.ellipse(x,dy,rx+9+pulse,ry+9+pulse,0,0,Math.PI*2); ctx.stroke();
-    }
-    // magneto aura
-    if (hasMagnet) {
-        ctx.shadowBlur=10; ctx.shadowColor='#ff66ff';
-        ctx.strokeStyle='rgba(255,102,255,.3)'; ctx.lineWidth=2;
-        ctx.setLineDash([4,6]);
-        ctx.beginPath(); ctx.ellipse(x,dy,rx+32,ry+32,0,0,Math.PI*2); ctx.stroke();
-        ctx.setLineDash([]);
-    }
-
-    ctx.shadowBlur=18; ctx.shadowColor='#0088ff';
-
-    // orelhas
-    ctx.fillStyle='#0055cc';
-    ctx.beginPath(); ctx.moveTo(x-rx+4,dy-ry+8); ctx.lineTo(x-rx/2,dy-ry-6); ctx.lineTo(x-2,dy-ry+4); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x+rx-4,dy-ry+8); ctx.lineTo(x+rx/2,dy-ry-6); ctx.lineTo(x+2,dy-ry+4); ctx.fill();
-
-    // corpo
-    const g = ctx.createRadialGradient(x-6,dy-6,2,x,dy,r);
-    g.addColorStop(0,'#00d9ff'); g.addColorStop(.7,'#0055cc'); g.addColorStop(1,'#0011aa');
-    ctx.fillStyle=g;
-    ctx.beginPath(); ctx.ellipse(x,dy,rx+pulse*.5,ry+pulse*.5,0,0,Math.PI*2); ctx.fill();
-
-    // olhos
-    ctx.shadowBlur=0; ctx.fillStyle='#fff';
-    ctx.beginPath(); ctx.ellipse(x-6,dy-4*sq.y,4,7*sq.y,0,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(x+6,dy-4*sq.y,4,7*sq.y,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#000';
-    ctx.beginPath(); ctx.arc(x-5,dy-4*sq.y,2,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x+7,dy-4*sq.y,2,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-}
-
-/* ═══════════════════ ENTIDADES ═══════════════════ */
-const COL_Z = 0.93, COL_ZMAX = 1.10;
+// Preços reduzidos para criança conseguir comprar mais facilmente const COL_Z = 0.93, COL_ZMAX = 1.10;
 
 function drawEntity(ent) {
     const z=ent.z, y=roadY(z), x=laneX(ent.lane,z), sc=.3+z*1.3;
@@ -786,7 +897,7 @@ function drawEntity(ent) {
         ctx.shadowBlur=12*sc; ctx.shadowColor='#ff3366'; ctx.fillStyle='#ff3366';
         ctx.beginPath();
         ctx.moveTo(x,y-h); ctx.lineTo(x+w/2,y); ctx.lineTo(x-w/2,y);
-        ctx.closePath(); ctx.fill();
+            ctx.closePath(); ctx.fill();
         // aviso de perigo no obstáculo
         ctx.fillStyle='rgba(255,255,100,.7)'; ctx.font=`bold ${Math.max(8,13*sc)}px sans-serif`;
         ctx.textAlign='center'; ctx.fillText('!',x,y-h*.55);
@@ -813,7 +924,6 @@ function drawEntity(ent) {
     }
     return { x, y, sc };
 }
-
 /* ═══════════════════ DANO ═══════════════════ */
 function applyDamage() {
     if (hasShield) {
@@ -878,7 +988,7 @@ function animate() {
     if (roadScroll-lastSpawnZ > SPAWN_GAP) { spawnEntity(); lastSpawnZ=roadScroll; }
 
     const px = laneX(laneOffset, 1);
-    const py = roadY(1) - 28;
+    const py = roadY(1) - 70;  // CORREÇÃO: boneco subido 42px para não ficar cortado
     const pr = 24;
     const airborne = jOff > jumpHeight * 0.12;  // janela generosa para "no ar"
     const crouched = isSliding && sq.y < 0.65;
